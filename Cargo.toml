@@ -32,6 +32,7 @@ strip = "debuginfo"
 
 [dependencies]
 bevy = { version = "*", features = ["dynamic_linking"] }
+bevy_pancam = "*"
 # Disable detailed logging for faster runtime performance
-log = { version = "*", features = ["max_level_debug", "release_max_level_warn"] }
+#log = { version = "*", features = ["max_level_debug", "release_max_level_warn"] }
 
