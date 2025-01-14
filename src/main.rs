@@ -1,6 +1,8 @@
 mod chunk;
 mod particle;
 mod camera;
+mod basic_assets;
+mod debug;
 
 use bevy::diagnostic::{DiagnosticsPlugin, LogDiagnosticsPlugin};
 use bevy::prelude::*;
