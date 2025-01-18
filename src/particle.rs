@@ -1,6 +1,7 @@
 use crate::basic_assets::{
     MaterialColorDatabase, MeshShapeDatabase, ParticleAssetPlugin, SimAssetId,
 };
+use crate::camera::MousePosition;
 use crate::chunk::{Chunk, ChunkPosition, EntityLookupChunk, CHUNK_SIZE};
 use crate::debug::ParticleDebugPlugin;
 use bevy::ecs::entity;
@@ -21,6 +22,12 @@ pub struct Mass(pub f32);
 
 #[derive(Component, Default, Clone, Debug)]
 pub struct LocalMassDensity(pub f32);
+
+#[derive(Default, Clone, Debug, Resource)]
+pub struct SimParameters {
+    pub pressure_mult: f32,
+    pub gravity: f32,
+}
 
 #[derive(Bundle, Clone, Default, Debug)]
 pub struct ParticleBundle {
@@ -54,6 +61,7 @@ pub struct ParticlePlugin;
 impl Plugin for ParticlePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<EntityLookupChunk>()
+            .init_resource::<SimParameters>()
             .add_plugins(ParticleAssetPlugin)
             .add_systems(Startup, spawn_particles)
             .add_systems(
@@ -62,6 +70,8 @@ impl Plugin for ParticlePlugin {
                     calc_pred_pos,
                     calc_local_mass_density,
                     calc_pressure_force,
+                    artificial_motion,
+                    mouse_interact,
                     calc_velocity,
                     update_particle_pos,
                 )
@@ -77,65 +87,143 @@ pub fn spawn_particles(
     colors: Res<MaterialColorDatabase>,
     meshes: Res<MeshShapeDatabase>,
 ) {
-    for x in 0..CHUNK_SIZE {
-        for y in 0..CHUNK_SIZE {
+    for x in 15..CHUNK_SIZE {
+        'outer: for y in 0..CHUNK_SIZE {
             let mesh_handle = meshes.handles.get(&SimAssetId::Particle).unwrap();
-            let color_handle = colors.handles.get(&SimAssetId::Particle).unwrap();
 
-            let mut rng = rand::thread_rng();
-            let x_f = x as f32 + (rng.gen::<f32>() - 0.5) * 0.8;
-            let y_f = y as f32 + (rng.gen::<f32>() - 0.5) * 0.8;
+            for z in 0..2 {
+                let spawn_code = ((x % 3 + 3 * y + z) % 5);
+                if spawn_code >= 3 {
+                    continue 'outer;
+                }
+                let mass = (spawn_code + 1) as f32 * 1.0;
+                let material = (spawn_code);
+                let color_handle = colors.handles.get(&material).unwrap();
+                let mut rng = rand::thread_rng();
+                let x_f = x as f32 + (rng.gen::<f32>() - 0.5) * 0.8;
+                let y_f = y as f32 + (rng.gen::<f32>() - 0.5) * 0.8;
 
-            let vel_x: f32 = rng.gen();
-            let vel_y: f32 = rng.gen();
+                let vel_x: f32 = rng.gen();
+                let vel_y: f32 = rng.gen();
 
-            let particle_bundle = ParticleBundle {
-                particle: Particle,
-                physics: ParticlePhysicsBundle {
-                    transform: Transform::from_xyz(x_f, y_f, 0.0),
-                    predicted_pos: PredictedPos(Vec2::new(x_f, y_f)),
-                    velocity: Velocity(Vec2::new(vel_x, vel_y)),
-                    mass: Mass(1.0),
-                    local_mass_density: LocalMassDensity(0.5),
+                let particle_bundle = ParticleBundle {
+                    particle: Particle,
+                    physics: ParticlePhysicsBundle {
+                        transform: Transform::from_xyz(x_f, y_f, 0.0),
+                        predicted_pos: PredictedPos(Vec2::new(x_f, y_f)),
+                        velocity: Default::default(),
+                        mass: Mass(mass),
+                        local_mass_density: LocalMassDensity(0.5),
+                        ..Default::default()
+                    },
+                    visual: ParticleVisualBundle {
+                        mesh: Mesh2d(mesh_handle.clone()),
+                        mesh_material: MeshMaterial2d(color_handle.clone()),
+                    },
                     ..Default::default()
-                },
-                visual: ParticleVisualBundle {
-                    mesh: Mesh2d(mesh_handle.clone()),
-                    mesh_material: MeshMaterial2d(color_handle.clone()),
-                },
-                ..Default::default()
-            };
-            let entity = commands.spawn(particle_bundle).id();
-            chunk
-                .insert(entity, x, y)
-                .expect("Adding Entity to Chunk failed");
+                };
+                let entity = commands.spawn(particle_bundle).id();
+                chunk
+                    .insert(entity, x, y)
+                    .expect("Adding Entity to Chunk failed");
+            }
         }
     }
 }
 
 pub fn calc_velocity(mut particles: Query<(&mut Velocity, &Acceleration), With<Particle>>) {
     for (mut vel, acc) in particles.iter_mut() {
-        vel.0.x += acc.0.x;
-        vel.0.y += acc.0.y;
+        // WARN: TEMPORARY -> = instead of +=
+
+        let len = vel.0.length();
+        vel.0 = vel.0.clamp_length_max(len * 0.9);
+
+        let mut rng = rand::thread_rng();
+
+        vel.0.x += acc.0.x + (rng.gen::<f32>() - 0.5) * 0.0001;
+        vel.0.y += acc.0.y + (rng.gen::<f32>() - 0.5) * 0.0001;
+
+        // println!("Vel calc: {}|{}", vel.0.x, vel.0.y);
+    }
+}
+
+pub fn artificial_motion(
+    mut particles: Query<(&mut Acceleration, &Transform, &LocalMassDensity), With<Particle>>,
+) {
+    for (mut acc, transf, density) in particles.iter_mut() {
+        let edge = 5.0;
+        if transf.translation.x < edge {
+            let strength = (edge - transf.translation.x) / edge;
+
+            acc.0.x += 0.2 / density.0 * strength;
+            acc.0.y += 0.5 / density.0 * strength;
+        }
+        let edge = 32.0;
+        if transf.translation.y > CHUNK_SIZE as f32 - edge {
+            let strength = (edge - (CHUNK_SIZE as f32 - transf.translation.y)) / edge;
+
+            acc.0.x += 0.5 / density.0 * strength;
+            acc.0.y -= 0.2 / density.0 * strength;
+        }
+    }
+}
+
+pub fn mouse_interact(
+    mut particles: Query<(&mut Acceleration, &Transform, &LocalMassDensity), With<Particle>>,
+    mouse_pos: Res<MousePosition>,
+    entity_lookup_chunk: Res<EntityLookupChunk>,
+) {
+    let chunk_pos = Chunk::<Vec<Entity>>::get_chunk_pos(mouse_pos.0.x, mouse_pos.0.y);
+    if chunk_pos.is_none() {
+        return;
+    }
+    let chunk_pos = chunk_pos.unwrap();
+
+    let entities =
+        entity_lookup_chunk.get_neighborhood_entities(chunk_pos.x as usize, chunk_pos.y as usize);
+
+    for entity in entities.iter() {
+        let (mut acc, transf, density) = particles.get_mut(*entity).expect("AAAAAHHHHH");
+        let diff = Vec2::new(
+            transf.translation.x - mouse_pos.0.x,
+            transf.translation.y - mouse_pos.0.y,
+        );
+        let len = diff.length();
+        if len >= 1.0 || len <= 0.0001 {
+            continue;
+        }
+        let direction = diff.normalize_or_zero();
+        let strength = (1.0 - len) * 0.5;
+        let force = Vec2::new(
+            direction.x * strength / density.0,
+            direction.y * strength / density.0,
+        );
+
+        acc.0.x += force.x;
+        acc.0.y += force.y;
     }
 }
 
 pub fn calc_pressure_force(
-    mut particles: Query<(&mut Acceleration, &Mass, &Transform), With<Particle>>,
+    mut particles: Query<(&mut Acceleration, &LocalMassDensity, &Transform), With<Particle>>,
     read_particles: Query<(&Transform, &LocalMassDensity, &Mass), With<Particle>>,
     entity_lookup_chunk: Res<EntityLookupChunk>,
+    params: Res<SimParameters>,
 ) {
-    for (mut acc, mass, pos) in particles.iter_mut() {
+    for (mut acc, mass_density, pos) in particles.iter_mut() {
         let mut rng = rand::thread_rng();
         let pos = Vec2::new(
-            pos.translation.x + (rng.gen::<f32>() - 0.5) * 0.1,
-            pos.translation.y + (rng.gen::<f32>() - 0.5) * 0.1,
+            pos.translation.x, // + (rng.gen::<f32>() - 0.5) * 0.1,
+            pos.translation.y, // + (rng.gen::<f32>() - 0.5) * 0.1,
         );
         let pressure_force =
-            get_particle_pressure_gradient(pos, &read_particles, &entity_lookup_chunk)
+            get_particle_pressure_gradient(pos, &read_particles, &entity_lookup_chunk, &params)
                 .unwrap_or_default();
-        acc.0.x = pressure_force.x / mass.0;
-        acc.0.y = pressure_force.y / mass.0 + 0.1;
+        // NOTE: usize mass_density because here it is the "local" mass
+        acc.0.x = pressure_force.x / mass_density.0;
+        acc.0.y = pressure_force.y / mass_density.0 - params.gravity;
+        //let len = acc.0.length();
+        //acc.0.clamp_length_max(len * 0.9);
     }
 }
 
@@ -229,7 +317,7 @@ pub fn get_particle_mass_density(
     Some(density)
 }
 
-pub const DAMPENING: f32 = 0.8;
+pub const DAMPENING: f32 = 0.7;
 pub fn update_particle_pos(
     mut particles: Query<
         (Entity, &mut Transform, &mut Velocity, &mut ChunkPosition),
@@ -239,26 +327,28 @@ pub fn update_particle_pos(
 ) {
     for (entity, mut pos, mut vel, mut chunk_pos) in particles.iter_mut() {
         let mut new_x = pos.translation.x + vel.0.x;
-        if new_x < 0.0 {
-            new_x = 0.0;
-            vel.0.x = vel.0.x * -DAMPENING;
-        } else if new_x > 31.0 {
-            new_x = 31.0;
-            vel.0.x = vel.0.x * -DAMPENING;
+        // println!("Vel: {}|{}", vel.0.x, vel.0.y);
+        if new_x < 0.5 {
+            new_x = 0.5;
+            vel.0.x *= -DAMPENING;
+        } else if new_x > (CHUNK_SIZE - 1) as f32 {
+            new_x = (CHUNK_SIZE - 1) as f32;
+            vel.0.x *= -DAMPENING;
         }
 
         let mut new_y = pos.translation.y + vel.0.y;
-        if new_y < 0.0 {
-            new_y = 0.0;
-            vel.0.y = vel.0.y * -DAMPENING;
-        } else if new_y > 31.0 {
-            new_y = 31.0;
-            vel.0.y = vel.0.y * -DAMPENING;
+        if new_y < 0.5 {
+            new_y = 0.5;
+            vel.0.y *= -DAMPENING;
+        } else if new_y > (CHUNK_SIZE - 1) as f32 {
+            new_y = (CHUNK_SIZE - 1) as f32;
+            vel.0.y *= -DAMPENING;
         }
 
         pos.translation.x = new_x;
         pos.translation.y = new_y;
 
+        // println!("{}|{}", new_x, new_y);
         let previous = chunk_pos.pos.clone();
         // println!("ChunkPos {}|{}", chunk_pos.pos.x, chunk_pos.pos.y);
 
@@ -281,11 +371,14 @@ pub fn get_particle_pressure_gradient(
     at_pos: Vec2,
     particles: &Query<(&Transform, &LocalMassDensity, &Mass), With<Particle>>,
     entity_lookup_chunk: &EntityLookupChunk,
+    params: &SimParameters,
 ) -> Option<Vec2> {
     let chunk_pos: UVec2 = Chunk::<Vec<Entity>>::get_chunk_pos(at_pos.x, at_pos.y)?;
     let chunk_x = chunk_pos.x as usize;
     let chunk_y = chunk_pos.y as usize; //println!("Chunk_pos: {}|{}", chunk_x, chunk_y);
     let entities = entity_lookup_chunk.get_neighborhood_entities(chunk_x, chunk_y);
+
+    let mut rng = rand::thread_rng();
 
     let mut result = Vec2::ZERO;
     for entity in entities.iter() {
@@ -297,12 +390,23 @@ pub fn get_particle_pressure_gradient(
         if dist >= INFLUENCE_RADIUS {
             continue;
         }
+        if dist <= 0.000001 {
+            result = result.mul_add(
+                Vec2::ONE,
+                Vec2::new(
+                    rng.gen::<f32>() * 0.01 - 0.005,
+                    rng.gen::<f32>() * 0.01 - 0.005,
+                ),
+            );
+            continue;
+        }
         // println!("Diff: ", )
         let direction = diff.normalize_or_zero();
         // NOTE: It might be easier to just leave density out entirely and instead rely on
         // particle_density???;
-        // let influence = mass.0 / mass_density.0;
-        let influence = pressure_from_density(mass_density.0) / mass_density.0 * mass.0;
+        // let influence = mass.0 / pressure_from_density(mass_density.0, &pressure_mult);
+        let influence = pressure_from_density(mass_density.0, &params) / mass_density.0 * mass.0;
+        // let influence = mass.0 / mass_density.0 * 0.1;
 
         let derivative = distance_density_derivative(dist);
         let derivative_vector = Vec2::new(
@@ -310,7 +414,6 @@ pub fn get_particle_pressure_gradient(
             -direction.y * derivative * influence,
         );
         // println!("Single deriv: {derivative_vector:?}");
-
         result = result.mul_add(Vec2::ONE, derivative_vector);
     }
     Some(result)
@@ -353,10 +456,17 @@ pub fn distance_density_derivative(distance: f32) -> f32 {
     3.0 * (INFLUENCE_RADIUS - distance).powi(2)
 }
 
-pub const TARGET_DENSITY: f32 = 1.0;
-pub const PRESSURE_MULTIPLIER: f32 = 0.001;
+pub const TARGET_DENSITY: f32 = 0.0;
 
-pub fn pressure_from_density(density: f32) -> f32 {
+pub fn pressure_from_density(density: f32, params: &SimParameters) -> f32 {
     let error = density - TARGET_DENSITY;
-    error * PRESSURE_MULTIPLIER
+    let mut val = error * params.pressure_mult;
+    if val.is_nan() {
+        val = 0.0;
+    }
+    if val.abs() <= 0.01 {
+        val.signum() * 0.01
+    } else {
+        val
+    }
 }

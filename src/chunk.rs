@@ -1,7 +1,7 @@
 use bevy::{prelude::*, utils::HashSet};
 use std::array;
 
-pub const CHUNK_SIZE: usize = 32;
+pub const CHUNK_SIZE: usize = 64;
 
 pub struct Chunk<T> {
     pub cells: [T; CHUNK_SIZE * CHUNK_SIZE],

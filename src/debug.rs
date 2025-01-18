@@ -2,7 +2,7 @@ use crate::camera::MousePosition;
 use crate::chunk::{Chunk, EntityLookupChunk, CHUNK_SIZE};
 use crate::particle::{
     get_particle_density, get_particle_mass_density, get_particle_pressure_gradient,
-    LocalMassDensity, Mass, Particle, PredictedPos, Velocity,
+    LocalMassDensity, Mass, Particle, PredictedPos, SimParameters, Velocity,
 };
 use bevy::app::{App, Plugin, Update};
 use bevy::color::palettes::tailwind::{BLUE_200, GREEN_700, ORANGE_400, RED_500};
@@ -84,8 +84,10 @@ pub fn derivative_arrow(
     at_pos: Res<MousePosition>,
     particles: Query<(&Transform, &LocalMassDensity, &Mass), With<Particle>>,
     entity_lookup_chunk: Res<EntityLookupChunk>,
+    pres_mult: Res<SimParameters>,
 ) {
-    let derivative = get_particle_pressure_gradient(at_pos.0, &particles, &entity_lookup_chunk);
+    let derivative =
+        get_particle_pressure_gradient(at_pos.0, &particles, &entity_lookup_chunk, &pres_mult);
     if derivative.is_none() {
         return;
     }
@@ -200,6 +202,7 @@ pub fn config_show_derivative_gizmo_enabled(debug_config: Res<DebugConfig>) -> b
 pub fn debug_config_ui(
     mut contexts: EguiContexts,
     mut config: ResMut<DebugConfig>,
+    mut pressure_mult: ResMut<SimParameters>,
     mouse_pos: Res<MousePosition>,
 ) {
     let show_mouse_pos = config.show_mouse_pos;
@@ -224,5 +227,11 @@ pub fn debug_config_ui(
         );
         ui.checkbox(&mut config.show_density_grid, "Show Density Grid");
         ui.checkbox(&mut config.show_derivative_gizmo, "Show Derivative");
+        ui.add(
+            egui::Slider::new(&mut pressure_mult.pressure_mult, 0.0..=0.2)
+                .text("Pressure Multiplier"),
+        );
+
+        ui.add(egui::Slider::new(&mut pressure_mult.gravity, 0.0..=0.03).text("Gravity"));
     });
 }
