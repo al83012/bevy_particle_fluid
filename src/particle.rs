@@ -70,8 +70,9 @@ impl Plugin for ParticlePlugin {
                     calc_pred_pos,
                     calc_local_mass_density,
                     calc_pressure_force,
-                    artificial_motion,
-                    mouse_interact,
+                    // artificial_motion,
+                    // mouse_interact,
+                    // smooth_flow,
                     calc_velocity,
                     update_particle_pos,
                 )
@@ -87,17 +88,26 @@ pub fn spawn_particles(
     colors: Res<MaterialColorDatabase>,
     meshes: Res<MeshShapeDatabase>,
 ) {
-    for x in 15..CHUNK_SIZE {
+    for x in 0..CHUNK_SIZE {
         'outer: for y in 0..CHUNK_SIZE {
             let mesh_handle = meshes.handles.get(&SimAssetId::Particle).unwrap();
 
-            for z in 0..2 {
-                let spawn_code = ((x % 3 + 3 * y + z) % 5);
-                if spawn_code >= 3 {
-                    continue 'outer;
+            for z in 0..1 {
+                // let spawn_code = ((x % 3 + 3 * y + z) % 5);
+                // if spawn_code >= 3 {
+                // continue 'outer;
+                // }
+                // let mass = (spawn_code * 3 + 1) as f32 * 1.0;
+
+                // let material = (spawn_code);
+
+                let spawn_code = (x + y + z) % 2;
+                if spawn_code == 2 {
+                    continue;
                 }
-                let mass = (spawn_code + 1) as f32 * 1.0;
-                let material = (spawn_code);
+                let mass = spawn_code as f32 * 3.0 + 2.0;
+                let material = spawn_code;
+
                 let color_handle = colors.handles.get(&material).unwrap();
                 let mut rng = rand::thread_rng();
                 let x_f = x as f32 + (rng.gen::<f32>() - 0.5) * 0.8;
@@ -140,8 +150,8 @@ pub fn calc_velocity(mut particles: Query<(&mut Velocity, &Acceleration), With<P
 
         let mut rng = rand::thread_rng();
 
-        vel.0.x += acc.0.x + (rng.gen::<f32>() - 0.5) * 0.0001;
-        vel.0.y += acc.0.y + (rng.gen::<f32>() - 0.5) * 0.0001;
+        vel.0.x += acc.0.x + (rng.gen::<f32>() - 0.5) * 0.0005;
+        vel.0.y += acc.0.y + (rng.gen::<f32>() - 0.5) * 0.0005;
 
         // println!("Vel calc: {}|{}", vel.0.x, vel.0.y);
     }
@@ -201,6 +211,41 @@ pub fn mouse_interact(
 
         acc.0.x += force.x;
         acc.0.y += force.y;
+    }
+}
+
+pub const RATIO: f32 = 0.1;
+
+pub fn smooth_flow(
+    mut particles: Query<(&mut Acceleration, &LocalMassDensity), With<Particle>>,
+    entity_lookup_chunk: Res<EntityLookupChunk>,
+) {
+    for x in 0..CHUNK_SIZE {
+        for y in 0..CHUNK_SIZE {
+            let entities = entity_lookup_chunk
+                .0
+                .get(x, y)
+                .expect("Should be in bounds");
+            let mut accumulated = Vec2::splat(0.0);
+            let mut acc_mass = 0.0;
+            for entity in entities.iter() {
+                let (mut acc, mass) = particles.get_mut(*entity).expect("Particle should exist");
+
+                acc_mass += mass.0;
+
+                let transf_x = acc.0.x * mass.0 * RATIO;
+                let transf_y = acc.0.y * mass.0 * RATIO;
+                accumulated.x += transf_x;
+                accumulated.y += transf_y;
+                acc.0.x -= transf_x;
+                acc.0.y -= transf_y;
+            }
+            for entity in entities.iter() {
+                let (mut acc, mass) = particles.get_mut(*entity).expect("Particle should exist");
+                acc.0.x += accumulated.x / acc_mass * mass.0;
+                acc.0.y += accumulated.y / acc_mass * mass.0;
+            }
+        }
     }
 }
 
