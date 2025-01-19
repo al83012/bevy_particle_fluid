@@ -93,20 +93,20 @@ pub fn spawn_particles(
             let mesh_handle = meshes.handles.get(&SimAssetId::Particle).unwrap();
 
             for z in 0..1 {
-                // let spawn_code = ((x % 3 + 3 * y + z) % 5);
-                // if spawn_code >= 3 {
-                // continue 'outer;
-                // }
-                // let mass = (spawn_code * 3 + 1) as f32 * 1.0;
-
-                // let material = (spawn_code);
-
-                let spawn_code = (x + y + z) % 2;
-                if spawn_code == 2 {
-                    continue;
+                let spawn_code = ((x % 3 + 3 * y + z) % 5);
+                if spawn_code >= 3 {
+                    continue 'outer;
                 }
-                let mass = spawn_code as f32 * 3.0 + 2.0;
-                let material = spawn_code;
+                let mass = (spawn_code * 3 + 1) as f32 * 1.0;
+
+                let material = (spawn_code);
+
+                // let spawn_code = (x + y + z) % 2;
+                // if spawn_code == 2 {
+                // continue;
+                // }
+                // let mass = spawn_code as f32 * 3.0 + 2.0;
+                // let material = spawn_code;
 
                 let color_handle = colors.handles.get(&material).unwrap();
                 let mut rng = rand::thread_rng();
